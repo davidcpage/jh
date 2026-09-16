@@ -81,53 +81,67 @@ _TEMPLATE = r"""<!doctype html>
   color-scheme: light dark;
   --bg: #fafafa; --fg: #1f2328; --muted: #656d76; --line: #d0d7de; --card: #ffffff;
   --ready: #1a7f37; --blocked: #bc4c00; --progress: #0969da; --closed: #8250df; --draft: #6e7781;
-  --hilite: #fff8c5; --code: #f0f2f4;
+  --hilite: #fff8c5; --code: #f0f2f4; --panel: #f0f2f5; --chip: #e9ecf0;
+  --tint-draft: #eef0f2; --tint-ready: #e6f3ea; --tint-blocked: #f8ece2; --tint-progress: #e4eef9; --tint-closed: #eee9f8;
+  --shadow: 0 1px 2px rgba(31, 35, 40, .08);
 }
 @media (prefers-color-scheme: dark) {
   :root {
     --bg: #0d1117; --fg: #e6edf3; --muted: #8b949e; --line: #30363d; --card: #161b22;
     --ready: #3fb950; --blocked: #f0883e; --progress: #58a6ff; --closed: #a371f7; --draft: #8b949e;
-    --hilite: #3b3419; --code: #21262d;
+    --hilite: #3b3419; --code: #21262d; --panel: #161b22; --chip: #1c2128;
+    --tint-draft: #181b20; --tint-ready: #0f1f16; --tint-blocked: #221709; --tint-progress: #0e1a2e; --tint-closed: #181427;
+    --shadow: 0 1px 0 rgba(255, 255, 255, .04) inset, 0 6px 16px rgba(0, 0, 0, .35);
   }
 }
 * { box-sizing: border-box; }
 body { margin: 0; padding: 16px; background: var(--bg); color: var(--fg);
   font: 14px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; }
 header { display: flex; flex-wrap: wrap; gap: 12px 24px; align-items: baseline; margin-bottom: 12px; }
-h1 { font-size: 20px; margin: 0; }
-h1 small { color: var(--muted); font-weight: normal; font-size: 13px; margin-left: 8px; }
+h1 { font-size: 24px; font-weight: 800; letter-spacing: -.02em; margin: 0; }
+h1 small { color: var(--muted); font-weight: 500; font-size: 14px; margin-left: 8px; letter-spacing: 0; }
 #filters { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
-#filters label { display: inline-flex; align-items: center; gap: 4px; border: 1px solid var(--line);
-  border-radius: 12px; padding: 1px 8px; cursor: pointer; font-size: 12px; background: var(--card); }
-#filters label.on { outline: 2px solid var(--progress); }
-.swatch { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+#filters label { display: inline-flex; align-items: center; gap: 6px; border-radius: 999px; padding: 3px 10px;
+  cursor: pointer; font-size: 12px; font-weight: 700; background: var(--chip); color: var(--muted); }
+#filters label.on { background: var(--fg); color: var(--bg); }
+.swatch { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
 .milestone { margin: 18px 0; border-top: 1px solid var(--line); padding-top: 8px; }
 .milestone > summary { list-style: none; cursor: pointer; display: flex; align-items: baseline; gap: 8px; }
 .milestone > summary::-webkit-details-marker { display: none; }
 .milestone > summary::before { content: "▸"; color: var(--muted); font-size: 12px; flex: 0 0 12px; }
 .milestone[open] > summary::before { content: "▾"; }
-.milestone h2 { font-size: 15px; margin: 0 0 8px; display: flex; gap: 10px; align-items: baseline; }
-.milestone h2 .meta { color: var(--muted); font-weight: normal; font-size: 12px; }
-.columns { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
-@media (max-width: 900px) { .columns { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.milestone h2 { font-size: 17px; font-weight: 800; margin: 0 0 10px; display: flex; gap: 14px; align-items: center; flex-wrap: wrap; }
+.milestone h2 .meta { color: var(--muted); font-weight: 700; font-size: 12px; }
+.milestone h2 .bar { flex: 0 0 160px; height: 6px; border-radius: 3px; background: var(--chip); overflow: hidden; }
+.milestone h2 .bar span { display: block; height: 100%; background: var(--closed); }
+.columns { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; }
+@media (max-width: 1100px) { .columns { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (max-width: 800px) { .columns { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 500px) { .columns { grid-template-columns: 1fr; } }
-.col h3 { font-size: 12px; text-transform: uppercase; letter-spacing: .04em; margin: 0 0 6px; color: var(--muted); }
-.col h3 .n { margin-left: 6px; font-weight: normal; }
-.col.ready h3 { color: var(--ready); } .col.blocked h3 { color: var(--blocked); } .col.draft h3 { color: var(--draft); }
-.col.progress h3 { color: var(--progress); } .col.closed h3 { color: var(--closed); }
-.card { background: var(--card); border: 1px solid var(--line); border-left-width: 4px; border-radius: 6px;
-  padding: 6px 8px; margin-bottom: 6px; }
+.col { border-radius: 14px; padding: 8px; display: flex; flex-direction: column; gap: 8px; background: var(--panel); }
+.col.draft { background: var(--tint-draft); } .col.ready { background: var(--tint-ready); } .col.blocked { background: var(--tint-blocked); }
+.col.progress { background: var(--tint-progress); } .col.closed { background: var(--tint-closed); }
+.col h3 { font-size: 12px; font-weight: 800; text-transform: uppercase; letter-spacing: .06em; margin: 0; padding: 6px 10px;
+  border-radius: 8px; color: #0b0e12; display: flex; justify-content: space-between; background: var(--muted); }
+.col.ready h3 { background: var(--ready); } .col.blocked h3 { background: var(--blocked); } .col.draft h3 { background: var(--draft); }
+.col.progress h3 { background: var(--progress); } .col.closed h3 { background: var(--closed); }
+.col.closed h3, .col.progress h3 { color: #ffffff; }
+@media (prefers-color-scheme: dark) { .col.closed h3, .col.progress h3 { color: #0b0e12; } }
+.card { background: var(--card); border-radius: 10px; padding: 12px; box-shadow: var(--shadow); display: flex; flex-direction: column; gap: 8px; }
 .card.hilite { background: var(--hilite); }
-.col.ready .card { border-left-color: var(--ready); } .col.blocked .card { border-left-color: var(--blocked); } .col.draft .card { border-left-color: var(--draft); }
-.col.progress .card { border-left-color: var(--progress); } .col.closed .card { border-left-color: var(--closed); }
-.card .num { color: var(--muted); font-variant-numeric: tabular-nums; margin-right: 4px; }
-.card .title { font-weight: 600; }
-.card .labels { margin-top: 3px; display: flex; flex-wrap: wrap; gap: 3px; }
-.lbl { font-size: 11px; border-radius: 10px; padding: 0 7px; border: 1px solid transparent; }
+.col.closed .card { opacity: .6; } .col.closed .card:hover, .col.closed .card.hilite { opacity: 1; }
+.card .num { font-weight: 800; font-variant-numeric: tabular-nums; }
+.col.ready .num { color: var(--ready); } .col.blocked .num { color: var(--blocked); } .col.draft .num { color: var(--draft); }
+.col.progress .num { color: var(--progress); } .col.closed .num { color: var(--closed); }
+.card .title { font-weight: 700; font-size: 14px; line-height: 1.35; }
+.card .labels { display: flex; flex-wrap: wrap; gap: 4px; }
+.card .foot { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.card .foot .deps { display: flex; gap: 10px; flex-wrap: wrap; margin: 0; }
+.lbl { font-size: 11px; font-weight: 700; border-radius: 4px; padding: 1px 6px; }
 .card details.more summary { cursor: pointer; list-style: none; }
 .card details.more summary::-webkit-details-marker { display: none; }
 .card details.more[open] summary .title { text-decoration: underline dotted; }
-.card .meta { margin-top: 4px; font-size: 12px; color: var(--muted); }
+.card .meta { font-size: 12px; color: var(--muted); }
 .card .body { margin-top: 6px; font-size: 13px; line-height: 1.45; overflow-wrap: anywhere; }
 .card .body.plain { white-space: pre-wrap; }
 .card .body > :first-child { margin-top: 0; } .card .body > :last-child { margin-bottom: 0; }
@@ -149,14 +163,14 @@ h1 small { color: var(--muted); font-weight: normal; font-size: 13px; margin-lef
 .card .body a { color: var(--progress); }
 .card .body hr { border: 0; border-top: 1px solid var(--line); }
 .card .body input[type=checkbox] { margin: 0 4px 0 0; vertical-align: middle; }
-.card .comments { margin-top: 8px; border-top: 1px solid var(--line); padding-top: 6px; }
+.card .comments { border-top: 1px solid var(--line); padding-top: 6px; }
 .card .comment { margin-bottom: 8px; } .card .comment .who { font-weight: 600; font-size: 12px; }
 .card .comment .when { font-size: 12px; color: var(--muted); }
 .card.hilite { transition: background 1s; }
-.deps { margin-top: 4px; font-size: 12px; color: var(--muted); }
+.deps { font-size: 12px; font-weight: 500; color: var(--muted); }
 .deps .open { color: var(--blocked); } .deps .closed { text-decoration: line-through; }
 .deps a { color: inherit; }
-.empty { color: var(--muted); font-size: 12px; font-style: italic; }
+.empty { color: var(--muted); font-size: 12px; font-style: italic; padding: 2px 4px; }
 #graphbox { margin-top: 24px; border-top: 1px solid var(--line); padding-top: 8px; }
 summary { cursor: pointer; font-weight: 600; }
 #graph { overflow-x: auto; margin-top: 8px; }
@@ -249,16 +263,16 @@ footer { margin-top: 24px; color: var(--muted); font-size: 12px; }
   function card(issue, byNumber) {
     var deps = "";
     if (issue.blockedBy.length) {
-      deps = '<div class="deps">blocked by ' + issue.blockedBy.map(function (d) {
+      deps = '<span class="deps">blocked by ' + issue.blockedBy.map(function (d) {
         var b = byNumber[d.number];
         var cls = b && b.state === "OPEN" ? "open" : "closed";
         return '<a class="' + cls + '" href="#issue-' + d.number + '" title="' + esc(d.title) + '">#' + d.number + '</a>';
-      }).join(", ") + '</div>';
+      }).join(", ") + '</span>';
     }
     if (issue.blocking.length) {
-      deps += '<div class="deps">blocks ' + issue.blocking.map(function (d) {
+      deps += '<span class="deps">blocks ' + issue.blocking.map(function (d) {
         return '<a href="#issue-' + d.number + '" title="' + esc(d.title) + '">#' + d.number + '</a>';
-      }).join(", ") + '</div>';
+      }).join(", ") + '</span>';
     }
     var meta = [issue.state === "CLOSED" ? "closed" + (issue.stateReason ? " (" + issue.stateReason.toLowerCase().replace("_", " ") + ")" : "") : "open",
       "opened by " + esc(issue.author && issue.author.login || "?") + " " + ago(issue.createdAt),
@@ -271,11 +285,12 @@ footer { margin-top: 24px; color: var(--muted); font-size: 12px; }
     var count = issue.comments.length ? " · " + issue.comments.length + (issue.comments.length === 1 ? " comment" : " comments") : "";
     return '<div class="card" id="issue-' + issue.number + '">' +
       '<details class="more"><summary>' +
-      '<span class="num">#' + issue.number + '</span><span class="title">' + esc(issue.title) + '</span>' +
+      '<span class="title">' + esc(issue.title) + '</span>' +
       (issue.assignees.length ? '<span class="deps"> · ' + esc(issue.assignees.map(function (a) { return a.login; }).join(", ")) + '</span>' : "") +
       '</summary>' +
       '<div class="meta">' + meta + count + '</div>' + body + comments + '</details>' +
-      '<div class="labels">' + issue.labels.map(labelChip).join("") + '</div>' + deps + '</div>';
+      '<div class="labels">' + issue.labels.map(labelChip).join("") + '</div>' +
+      '<div class="foot"><span class="num">#' + issue.number + '</span><div class="deps">' + deps + '</div></div></div>';
   }
   function render() {
     var byNumber = {};
@@ -317,7 +332,9 @@ footer { margin-top: 24px; color: var(--muted); font-size: 12px; }
       var key = m.number === null ? "none" : String(m.number);
       var allDone = mine.length > 0 && closedCount === mine.length;
       var isOpen = collapsed[key] === undefined ? !allDone : !collapsed[key];
-      return '<details class="milestone" data-key="' + key + '"' + (isOpen ? " open" : "") + '><summary><h2>' + esc(m.title) + '<span class="meta">' + esc(meta.join(" · ")) +
+      var pct = mine.length ? Math.round(100 * closedCount / mine.length) : 0;
+      return '<details class="milestone" data-key="' + key + '"' + (isOpen ? " open" : "") + '><summary><h2>' + esc(m.title) +
+        '<span class="bar" title="' + pct + '%"><span style="width:' + pct + '%"></span></span><span class="meta">' + esc(meta.join(" · ")) +
         (m.description ? " · " + esc(m.description) : "") + '</span></h2></summary><div class="columns">' +
         cols.map(function (c) {
           var items = mine.filter(function (i) { return column(i, byNumber) === c[0]; });
