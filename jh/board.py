@@ -8,8 +8,8 @@ markdown, rendered in the browser with marked (raw HTML in them is shown
 escaped, `#N` links to the card for issue N, mermaid fences are drawn). The
 server renders it live at `/:repo/board` (polling `/:repo/events?since=SEQ`);
 `jh board --snapshot FILE` writes the same page with the data inlined and
-polling disabled. The theme follows the browser unless the reader picks
-light or dark in the header (remembered per browser). Both marked and
+polling disabled. The theme starts from the browser's preference; the
+sun/moon in the header flips it, remembered per browser. Both marked and
 mermaid come from cdnjs; without them the
 page still renders, with bodies as plain text and the graph as source.
 """
@@ -139,10 +139,11 @@ h1 small { color: var(--muted); font-weight: 500; font-size: 14px; margin-left: 
 .col.closed h3, .col.progress h3 { color: #ffffff; }
 @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .col.closed h3, :root:not([data-theme="light"]) .col.progress h3 { color: #0b0e12; } }
 :root[data-theme="dark"] .col.closed h3, :root[data-theme="dark"] .col.progress h3 { color: #0b0e12; }
-#theme { margin-left: auto; display: inline-flex; border-radius: 999px; background: var(--chip); padding: 2px; }
-#theme button { border: 0; background: none; color: var(--muted); font: inherit; font-size: 12px; font-weight: 700;
-  padding: 2px 10px; border-radius: 999px; cursor: pointer; }
-#theme button.on { background: var(--fg); color: var(--bg); }
+#theme { margin-left: auto; border: 0; background: none; color: var(--muted); padding: 4px; cursor: pointer;
+  display: inline-flex; align-items: center; border-radius: 6px; opacity: .7; }
+#theme:hover { opacity: 1; background: var(--chip); }
+#theme svg { width: 16px; height: 16px; stroke: currentColor; fill: none; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+#theme .sun { display: none; } :root[data-theme="dark"] #theme .sun { display: block; } :root[data-theme="dark"] #theme .moon { display: none; }
 .card { background: var(--card); border-radius: 10px; padding: 12px; box-shadow: var(--shadow); display: flex; flex-direction: column; gap: 8px; }
 .card.hilite { background: var(--hilite); }
 .col.closed .card { opacity: .6; } .col.closed .card:hover, .col.closed .card.hilite { opacity: 1; }
@@ -197,7 +198,10 @@ footer { margin-top: 24px; color: var(--muted); font-size: 12px; }
 <header>
   <h1 id="title"></h1>
   <div id="filters"></div>
-  <div id="theme" role="radiogroup" aria-label="Theme"><button data-theme="system">System</button><button data-theme="light">Light</button><button data-theme="dark">Dark</button></div>
+  <button id="theme" title="Switch theme" aria-label="Switch theme">
+    <svg class="moon" viewBox="0 0 24 24"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>
+    <svg class="sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
+  </button>
 </header>
 <main id="board"></main>
 <details id="graphbox"><summary>Dependency graph</summary><div id="graph"></div></details>
@@ -210,35 +214,25 @@ footer { margin-top: 24px; color: var(--muted); font-size: 12px; }
   var DRAFT = "__DRAFT__";
   var data = JSON.parse(document.getElementById("data").textContent);
   var active = {};
+  // Light or dark: the browser's preference until the reader clicks the
+  // sun/moon in the header, then that choice, remembered per browser.
   var themeKey = "jh-board-theme";
-  var theme = "system";
-  try { theme = localStorage.getItem(themeKey) || "system"; } catch (e) {}
-  function isDark() {
-    if (theme === "dark") return true;
-    if (theme === "light") return false;
-    return !!(window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches);
+  var theme = null;
+  try { theme = localStorage.getItem(themeKey); } catch (e) {}
+  if (theme !== "light" && theme !== "dark") {
+    theme = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
   }
+  function isDark() { return theme === "dark"; }
   function applyTheme() {
-    if (theme === "system") document.documentElement.removeAttribute("data-theme");
-    else document.documentElement.setAttribute("data-theme", theme);
-    Array.prototype.forEach.call(document.querySelectorAll("#theme button"), function (b) {
-      b.classList.toggle("on", b.dataset.theme === theme);
-      b.setAttribute("aria-checked", b.dataset.theme === theme ? "true" : "false");
-    });
+    document.documentElement.setAttribute("data-theme", theme);
     if (window.mermaid) window.mermaid.initialize({ startOnLoad: false, theme: isDark() ? "dark" : "default" });
   }
   applyTheme();
-  Array.prototype.forEach.call(document.querySelectorAll("#theme button"), function (b) {
-    b.onclick = function () {
-      theme = b.dataset.theme;
-      try { localStorage.setItem(themeKey, theme); } catch (e) {}
-      applyTheme(); render();
-    };
-  });
-  if (window.matchMedia) {
-    var mq = window.matchMedia("(prefers-color-scheme: dark)");
-    (mq.addEventListener ? mq.addEventListener.bind(mq, "change") : mq.addListener.bind(mq))(function () { if (theme === "system") { applyTheme(); render(); } });
-  }
+  document.getElementById("theme").onclick = function () {
+    theme = isDark() ? "light" : "dark";
+    try { localStorage.setItem(themeKey, theme); } catch (e) {}
+    applyTheme(); render();
+  };
   var collapsedKey = "jh-board-collapsed-" + data.repo;
   var collapsed = {};
   try { collapsed = JSON.parse(localStorage.getItem(collapsedKey) || "{}") || {}; } catch (e) { collapsed = {}; }
