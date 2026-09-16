@@ -231,6 +231,13 @@ def test_docs_viewer_serves_markdown_and_assets(tmp_path: Path) -> None:
         assert ".hidden.md" not in page
         assert "cdnjs.cloudflare.com/ajax/libs/marked/" in page
 
+        # The board learns the docs tree so issue text can link into it.
+        call(base, "POST", "/repos", {"name": "demo"})
+        status, data, _ = call(base, "GET", "/demo/board?format=json")
+        assert status == 200 and data["docs"]["base"] == root.name
+        assert "increments/00.md" in data["docs"]["files"]
+        assert ".hidden.md" not in data["docs"]["files"]
+
         status, raw, headers = call(base, "GET", "/demo/docs/plan.md?format=raw")
         assert (
             status == 200

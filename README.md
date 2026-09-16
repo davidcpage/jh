@@ -123,7 +123,11 @@ jh board --snapshot board.html              # self-contained copy
 
 Issue bodies and comments are GitHub-flavoured markdown. The board renders
 them in the browser (marked from cdnjs, as the docs viewer does): raw HTML
-is shown escaped, `#12` links to that card, mermaid fences are drawn.
+is shown escaped, `#12` links to that card, mermaid fences are drawn. When
+the repo has a docs root (below), a document path in the text links into
+the docs viewer: `docs/plan.md`, `plan.md` if the name is unique in the
+tree, and `docs/plan.md#Heading text` or `[the plan](docs/plan.md#Heading)`
+for a section, the heading slugged the way the viewer slugs its ids.
 
 Extensions (GitHub concepts gh's CLI does not expose) are `--blocked-by`,
 `--add-blocked-by` / `--remove-blocked-by`, `jh issue list --ready |

@@ -361,10 +361,13 @@ class JhRequestHandler(BaseHTTPRequestHandler):
         self, m: dict[str, str], q: dict[str, Any], b: dict[str, Any]
     ) -> Any:
         """The live board, or its data as JSON with `?format=json`."""
+        docs_root = self.server.docs.get(m["repo"])
         if q.get("format") == "json":
-            return board.board_data(self.store, m["repo"])
+            return board.board_data(self.store, m["repo"], docs_root)
         self.store.repo(m["repo"])
-        self._send_html(board.render_board(self.store, m["repo"], live=True))
+        self._send_html(
+            board.render_board(self.store, m["repo"], live=True, docs_root=docs_root)
+        )
         return None
 
     # -- docs --------------------------------------------------------------

@@ -5,7 +5,10 @@ Ready / In progress / Closed (the path a card takes, left to right), a label fil
 card and a mermaid dependency graph (every open issue is a node, with or
 without dependencies). Issue bodies and comments are GitHub-flavoured
 markdown, rendered in the browser with marked (raw HTML in them is shown
-escaped, `#N` links to the card for issue N, mermaid fences are drawn). The
+escaped, `#N` links to the card for issue N, mermaid fences are drawn, and
+when the repo has a docs root a document path such as `docs/plan.md` or
+`plan.md#Heading` links into the docs viewer, the heading slugged the way
+the viewer slugs it). The
 server renders it live at `/:repo/board` (polling `/:repo/events?since=SEQ`);
 `jh board --snapshot FILE` writes the same page with the data inlined and
 polling disabled. The theme starts from the browser's preference; the
@@ -18,16 +21,32 @@ from __future__ import annotations
 
 import html
 import json
+from pathlib import Path
 from typing import Any
 
+from jh import docs
 from jh.jh_lib import DRAFT_LABEL, IN_PROGRESS_LABEL, Store
 
 MARKED_CDN = "https://cdnjs.cloudflare.com/ajax/libs/marked/15.0.12/marked.min.js"
 MERMAID_CDN = "https://cdnjs.cloudflare.com/ajax/libs/mermaid/11.12.0/mermaid.min.js"
 
 
-def board_data(store: Store, repo: str) -> dict[str, Any]:
-    """Collect everything the board needs as plain JSON."""
+def board_data(
+    store: Store, repo: str, docs_root: Path | None = None
+) -> dict[str, Any]:
+    """Collect everything the board needs as plain JSON.
+
+    Args:
+        store: The store to read from.
+        repo: Repo name.
+        docs_root: The directory served at `/REPO/docs`, when one is
+            configured. The board then turns document paths in issue text
+            (`docs/plan.md`, `plan.md#Heading`) into links to the docs viewer.
+
+    Returns:
+        The payload the board template renders; `docs` is null without a
+        docs root, else `{"base": <root dir name>, "files": [<paths>]}`.
+    """
     state = store.repo(repo)
     return {
         "repo": repo,
@@ -36,10 +55,17 @@ def board_data(store: Store, repo: str) -> dict[str, Any]:
         "issues": store.issue_list(repo, {"state": "all", "limit": 100000}),
         "labels": store.label_list(repo, {"limit": 100000}),
         "milestones": store.milestone_list(repo, {"state": "all"}),
+        "docs": (
+            {"base": docs_root.name, "files": [f["path"] for f in docs.tree(docs_root)]}
+            if docs_root
+            else None
+        ),
     }
 
 
-def render_board(store: Store, repo: str, live: bool = True) -> str:
+def render_board(
+    store: Store, repo: str, live: bool = True, docs_root: Path | None = None
+) -> str:
     """Render the board page.
 
     Args:
@@ -47,11 +73,12 @@ def render_board(store: Store, repo: str, live: bool = True) -> str:
         repo: Repo name.
         live: When true the page polls the server for new events and reloads;
             when false it is a self-contained snapshot.
+        docs_root: See `board_data`.
 
     Returns:
         A complete HTML document.
     """
-    return render_from_data(board_data(store, repo), live=live)
+    return render_from_data(board_data(store, repo, docs_root), live=live)
 
 
 def render_from_data(data: dict[str, Any], live: bool = False) -> str:
@@ -178,6 +205,7 @@ h1 small { color: var(--muted); font-weight: 500; font-size: 14px; margin-left: 
 .card .body th { background: var(--code); }
 .card .body img { max-width: 100%; }
 .card .body a { color: var(--progress); }
+.card .body a.doc { text-decoration: underline dotted; }
 .card .body hr { border: 0; border-top: 1px solid var(--line); }
 .card .body input[type=checkbox] { margin: 0 4px 0 0; vertical-align: middle; }
 .card .comments { border-top: 1px solid var(--line); padding-top: 6px; }
@@ -244,8 +272,53 @@ footer { margin-top: 24px; color: var(--muted); font-size: 12px; }
   // mermaid fences are drawn once the card is on the page. Until marked has
   // loaded (or if it never does) the text is shown escaped, whitespace kept.
   var markedReady = false;
+  function slug(text) {
+    return String(text).toLowerCase().replace(/[^\w\s-]/g, "").trim().replace(/\s+/g, "-");
+  }
+  // "docs/increments/01.md#Heading" -> the docs viewer URL for that file,
+  // or null. The path may be relative to the docs root, carry the root's
+  // directory name (or the repo name before it), or be a bare file name
+  // that occurs once in the tree. The fragment is slugged like the viewer
+  // slugs its heading ids.
+  function docHref(ref) {
+    if (!data.docs || !data.docs.files.length) return null;
+    var m = /^([^#]*)(?:#(.*))?$/.exec(ref);
+    var path = m[1], frag = m[2];
+    var files = data.docs.files;
+    var hit = null;
+    var i = path.indexOf(data.docs.base + "/");
+    if (i === 0 || (i > 0 && path.charAt(i - 1) === "/")) {
+      var rest = path.slice(i + data.docs.base.length + 1);
+      if (files.indexOf(rest) >= 0) hit = rest;
+    }
+    if (!hit && files.indexOf(path) >= 0) hit = path;
+    if (!hit) {
+      var tail = "/" + path;
+      var cands = files.filter(function (f) { return f.slice(-tail.length) === tail; });
+      if (cands.length === 1) hit = cands[0];
+    }
+    if (!hit) return null;
+    var url = data.baseUrl + "/" + encodeURIComponent(data.repo) + "/docs/" + hit;
+    if (frag) { try { frag = decodeURIComponent(frag); } catch (e) {} url += "#" + slug(frag); }
+    return url;
+  }
+  var PATH = /^((?:[\w.-]+\/)*[\w.-]+\.md)(#[\w.%-]+)?/;
   function setupMarked() {
     if (!window.marked) return;
+    var docref = { name: "docref", level: "inline",
+      start: function (src) {
+        var m = /(^|[\s(\[`"'<])((?:[\w.-]+\/)*[\w.-]+\.md)/.exec(src);
+        return m ? m.index + m[1].length : undefined;
+      },
+      tokenizer: function (src) {
+        var m = PATH.exec(src);
+        if (!m) return;
+        var href = docHref(m[1] + (m[2] || ""));
+        if (href) return { type: "docref", raw: m[0], text: m[0], href: href };
+      },
+      renderer: function (t) {
+        return '<a class="doc" href="' + esc(t.href) + '" target="_blank" rel="noopener">' + esc(t.text) + '</a>';
+      } };
     var link = { name: "issueref", level: "inline",
       start: function (src) { var m = /(^|[^\w&])#\d/.exec(src); return m ? m.index + m[1].length : undefined; },
       tokenizer: function (src) {
@@ -253,8 +326,18 @@ footer { margin-top: 24px; color: var(--muted); font-size: 12px; }
         if (m) return { type: "issueref", raw: m[0], number: m[1] };
       },
       renderer: function (t) { return '<a href="#issue-' + t.number + '">#' + t.number + '</a>'; } };
-    window.marked.use({ gfm: true, breaks: false, extensions: [link],
-      renderer: { html: function (t) { return esc(t.raw || t.text || t); } } });
+    window.marked.use({ gfm: true, breaks: false, extensions: [link, docref],
+      renderer: {
+        html: function (t) { return esc(t.raw || t.text || t); },
+        // [text](docs/plan.md#Heading): resolve a relative .md href the same way.
+        link: function (t) {
+          var href = t.href, cls = "";
+          if (!/^[a-z][a-z0-9+.-]*:/i.test(href) && href.charAt(0) !== "#" && PATH.test(href)) {
+            var r = docHref(href); if (r) { href = r; cls = ' class="doc" target="_blank" rel="noopener"'; }
+          }
+          return '<a href="' + esc(href) + '"' + (t.title ? ' title="' + esc(t.title) + '"' : "") + cls + '>' +
+            this.parser.parseInline(t.tokens) + '</a>';
+        } } });
     markedReady = true;
   }
   function md(text) {
