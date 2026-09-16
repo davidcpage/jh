@@ -1,14 +1,16 @@
 """Board HTML for jh.
 
-One row per milestone (plus "No milestone"), columns Draft / Ready /
-Blocked / In progress / Closed, a label filter, a dependency list on every
+One row per milestone (plus "No milestone"), columns Draft / Blocked /
+Ready / In progress / Closed (the path a card takes, left to right), a label filter, a dependency list on every
 card and a mermaid dependency graph (every open issue is a node, with or
 without dependencies). Issue bodies and comments are GitHub-flavoured
 markdown, rendered in the browser with marked (raw HTML in them is shown
 escaped, `#N` links to the card for issue N, mermaid fences are drawn). The
 server renders it live at `/:repo/board` (polling `/:repo/events?since=SEQ`);
 `jh board --snapshot FILE` writes the same page with the data inlined and
-polling disabled. Both marked and mermaid come from cdnjs; without them the
+polling disabled. The theme follows the browser unless the reader picks
+light or dark in the header (remembered per browser). Both marked and
+mermaid come from cdnjs; without them the
 page still renders, with bodies as plain text and the graph as source.
 """
 
@@ -86,13 +88,22 @@ _TEMPLATE = r"""<!doctype html>
   --shadow: 0 1px 2px rgba(31, 35, 40, .08);
 }
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme="light"]) {
     --bg: #0d1117; --fg: #e6edf3; --muted: #8b949e; --line: #30363d; --card: #161b22;
     --ready: #3fb950; --blocked: #f0883e; --progress: #58a6ff; --closed: #a371f7; --draft: #8b949e;
     --hilite: #3b3419; --code: #21262d; --panel: #161b22; --chip: #1c2128;
     --tint-draft: #181b20; --tint-ready: #0f1f16; --tint-blocked: #221709; --tint-progress: #0e1a2e; --tint-closed: #181427;
     --shadow: 0 1px 0 rgba(255, 255, 255, .04) inset, 0 6px 16px rgba(0, 0, 0, .35);
   }
+}
+:root[data-theme="light"] { color-scheme: light; }
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #0d1117; --fg: #e6edf3; --muted: #8b949e; --line: #30363d; --card: #161b22;
+  --ready: #3fb950; --blocked: #f0883e; --progress: #58a6ff; --closed: #a371f7; --draft: #8b949e;
+  --hilite: #3b3419; --code: #21262d; --panel: #161b22; --chip: #1c2128;
+  --tint-draft: #181b20; --tint-ready: #0f1f16; --tint-blocked: #221709; --tint-progress: #0e1a2e; --tint-closed: #181427;
+  --shadow: 0 1px 0 rgba(255, 255, 255, .04) inset, 0 6px 16px rgba(0, 0, 0, .35);
 }
 * { box-sizing: border-box; }
 body { margin: 0; padding: 16px; background: var(--bg); color: var(--fg);
@@ -126,7 +137,12 @@ h1 small { color: var(--muted); font-weight: 500; font-size: 14px; margin-left: 
 .col.ready h3 { background: var(--ready); } .col.blocked h3 { background: var(--blocked); } .col.draft h3 { background: var(--draft); }
 .col.progress h3 { background: var(--progress); } .col.closed h3 { background: var(--closed); }
 .col.closed h3, .col.progress h3 { color: #ffffff; }
-@media (prefers-color-scheme: dark) { .col.closed h3, .col.progress h3 { color: #0b0e12; } }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .col.closed h3, :root:not([data-theme="light"]) .col.progress h3 { color: #0b0e12; } }
+:root[data-theme="dark"] .col.closed h3, :root[data-theme="dark"] .col.progress h3 { color: #0b0e12; }
+#theme { margin-left: auto; display: inline-flex; border-radius: 999px; background: var(--chip); padding: 2px; }
+#theme button { border: 0; background: none; color: var(--muted); font: inherit; font-size: 12px; font-weight: 700;
+  padding: 2px 10px; border-radius: 999px; cursor: pointer; }
+#theme button.on { background: var(--fg); color: var(--bg); }
 .card { background: var(--card); border-radius: 10px; padding: 12px; box-shadow: var(--shadow); display: flex; flex-direction: column; gap: 8px; }
 .card.hilite { background: var(--hilite); }
 .col.closed .card { opacity: .6; } .col.closed .card:hover, .col.closed .card.hilite { opacity: 1; }
@@ -181,6 +197,7 @@ footer { margin-top: 24px; color: var(--muted); font-size: 12px; }
 <header>
   <h1 id="title"></h1>
   <div id="filters"></div>
+  <div id="theme" role="radiogroup" aria-label="Theme"><button data-theme="system">System</button><button data-theme="light">Light</button><button data-theme="dark">Dark</button></div>
 </header>
 <main id="board"></main>
 <details id="graphbox"><summary>Dependency graph</summary><div id="graph"></div></details>
@@ -193,6 +210,35 @@ footer { margin-top: 24px; color: var(--muted); font-size: 12px; }
   var DRAFT = "__DRAFT__";
   var data = JSON.parse(document.getElementById("data").textContent);
   var active = {};
+  var themeKey = "jh-board-theme";
+  var theme = "system";
+  try { theme = localStorage.getItem(themeKey) || "system"; } catch (e) {}
+  function isDark() {
+    if (theme === "dark") return true;
+    if (theme === "light") return false;
+    return !!(window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches);
+  }
+  function applyTheme() {
+    if (theme === "system") document.documentElement.removeAttribute("data-theme");
+    else document.documentElement.setAttribute("data-theme", theme);
+    Array.prototype.forEach.call(document.querySelectorAll("#theme button"), function (b) {
+      b.classList.toggle("on", b.dataset.theme === theme);
+      b.setAttribute("aria-checked", b.dataset.theme === theme ? "true" : "false");
+    });
+    if (window.mermaid) window.mermaid.initialize({ startOnLoad: false, theme: isDark() ? "dark" : "default" });
+  }
+  applyTheme();
+  Array.prototype.forEach.call(document.querySelectorAll("#theme button"), function (b) {
+    b.onclick = function () {
+      theme = b.dataset.theme;
+      try { localStorage.setItem(themeKey, theme); } catch (e) {}
+      applyTheme(); render();
+    };
+  });
+  if (window.matchMedia) {
+    var mq = window.matchMedia("(prefers-color-scheme: dark)");
+    (mq.addEventListener ? mq.addEventListener.bind(mq, "change") : mq.addListener.bind(mq))(function () { if (theme === "system") { applyTheme(); render(); } });
+  }
   var collapsedKey = "jh-board-collapsed-" + data.repo;
   var collapsed = {};
   try { collapsed = JSON.parse(localStorage.getItem(collapsedKey) || "{}") || {}; } catch (e) { collapsed = {}; }
@@ -319,7 +365,7 @@ footer { margin-top: 24px; color: var(--muted); font-size: 12px; }
       return stage(a) - stage(b) || (a.dueOn || "9999").localeCompare(b.dueOn || "9999") || a.number - b.number;
     });
     rows.push({ number: null, title: "No milestone", state: "OPEN", dueOn: null, description: "" });
-    var cols = [["draft", "Draft"], ["ready", "Ready"], ["blocked", "Blocked"], ["progress", "In progress"], ["closed", "Closed"]];
+    var cols = [["draft", "Draft"], ["blocked", "Blocked"], ["ready", "Ready"], ["progress", "In progress"], ["closed", "Closed"]];
     var out = rows.map(function (m) {
       var mine = shown.filter(function (i) { return (i.milestone ? i.milestone.number : null) === m.number; });
       if (!mine.length && m.number !== null && m.state === "CLOSED") return "";
@@ -439,10 +485,7 @@ footer { margin-top: 24px; color: var(--muted); font-size: 12px; }
     document.head.appendChild(script);
   }
   load("__MARKED__", setupMarked);
-  load("__MERMAID__", function () {
-    var dark = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
-    window.mermaid.initialize({ startOnLoad: false, theme: dark ? "dark" : "default" });
-  });
+  load("__MERMAID__", applyTheme);
   render();
   if (LIVE) setTimeout(poll, 3000);
 })();
