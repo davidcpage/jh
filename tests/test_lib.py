@@ -166,6 +166,23 @@ def test_close_records_state_reason_and_duplicate(tmp_path: Path) -> None:
         )
 
 
+def test_close_drops_the_in_progress_label(tmp_path: Path) -> None:
+    store = Store(tmp_path, base_url="http://x")
+    seed(store)
+    store.issue_edit("demo", "claude", 2, {"addLabels": ["in-progress", "bug"]})
+    closed = store.issue_edit("demo", "claude", 2, {"state": "closed"})
+    assert [l["name"] for l in closed["labels"]] == ["bug"]
+    kinds = [e["type"] for e in store.events_since("demo")][-2:]
+    assert kinds == ["issue.unlabeled", "issue.closed"]
+    # Reopening does not bring it back: nobody is on the issue.
+    reopened = store.issue_edit("demo", "claude", 2, {"state": "open"})
+    assert [l["name"] for l in reopened["labels"]] == ["bug"]
+    # Closing an issue that never had the label emits no unlabel event.
+    before = len(store.events_since("demo"))
+    store.issue_edit("demo", "claude", 3, {"state": "closed"})
+    assert len(store.events_since("demo")) == before + 1
+
+
 def test_search_qualifiers(tmp_path: Path) -> None:
     store = Store(tmp_path, base_url="http://x")
     seed(store)

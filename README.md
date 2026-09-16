@@ -114,7 +114,7 @@ jh issue list --ready                       # open, not blocked by any open issu
 jh issue list -s all --json number,title,state -q '.[].number'
 jh issue view 12 --json blockedBy -q '.blockedBy[].number'
 jh issue edit 12 --add-label in-progress
-jh issue close 12 -r completed -c "what changed"
+jh issue close 12 -r completed -c "what changed"   # also drops the in-progress label
 jh label create component:noc -c 0e8a16 -d "NoC work"
 jh milestone create -t "Increment 1" --due-on 2026-10-01
 jh board                                    # prints the board URL

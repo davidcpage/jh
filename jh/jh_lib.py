@@ -752,6 +752,19 @@ class Store:
             if reason is None:
                 reason = "duplicate"
 
+        # Closing ends the work, so the in-progress status label comes off
+        # with it (unless this same edit asks to add it). gh leaves labels
+        # alone on close; this is the one place jh departs, because the
+        # label exists only to say a session is on the issue right now.
+        if (
+            new_state == "closed"
+            and issue["state"] == "OPEN"
+            and IN_PROGRESS_LABEL in issue["labels"]
+            and IN_PROGRESS_LABEL not in add_labels
+            and IN_PROGRESS_LABEL not in remove_labels
+        ):
+            remove_labels.append(IN_PROGRESS_LABEL)
+
         # All validation done; emit events.
         if edited:
             self._commit(
