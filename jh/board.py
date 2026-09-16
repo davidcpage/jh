@@ -286,11 +286,16 @@ footer { margin-top: 24px; color: var(--muted); font-size: 12px; }
     var path = m[1], frag = m[2];
     var files = data.docs.files;
     var hit = null;
-    var i = path.indexOf(data.docs.base + "/");
-    if (i === 0 || (i > 0 && path.charAt(i - 1) === "/")) {
-      var rest = path.slice(i + data.docs.base.length + 1);
-      if (files.indexOf(rest) >= 0) hit = rest;
-    }
+    // The root's own directory name, or "docs": text written for a docs
+    // tree that has since moved keeps resolving.
+    [data.docs.base, "docs"].forEach(function (base) {
+      if (hit) return;
+      var i = path.indexOf(base + "/");
+      if (i === 0 || (i > 0 && path.charAt(i - 1) === "/")) {
+        var rest = path.slice(i + base.length + 1);
+        if (files.indexOf(rest) >= 0) hit = rest;
+      }
+    });
     if (!hit && files.indexOf(path) >= 0) hit = path;
     if (!hit) {
       var tail = "/" + path;
