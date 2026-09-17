@@ -197,6 +197,7 @@ def test_board_reading_page_and_browser_redirect(running: Any) -> None:
     assert "<title>#2 Latency · demo</title>" in page
     assert '"number": 2' in page and '"blockedBy": [{"number": 1' in page
     assert "cdnjs.cloudflare.com/ajax/libs/marked/" in page
+    assert "cdnjs.cloudflare.com/ajax/libs/highlight.js/" in page
     # The board's card titles link to the reading page.
     assert "/issues/\" + issue.number" in page or "/issues/" in page
     assert call(base, "GET", "/demo/issues/9", accept="text/html")[0] == 404
@@ -240,6 +241,7 @@ def test_docs_viewer_serves_markdown_and_assets(tmp_path: Path) -> None:
         assert '"path": "increments/00.md"' in page and '"title": "Increment 0"' in page
         assert ".hidden.md" not in page
         assert "cdnjs.cloudflare.com/ajax/libs/marked/" in page
+        assert "cdnjs.cloudflare.com/ajax/libs/highlight.js/" in page
 
         # The board learns the docs tree so issue text can link into it.
         call(base, "POST", "/repos", {"name": "demo"})

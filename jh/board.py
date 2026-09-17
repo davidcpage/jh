@@ -39,6 +39,9 @@ from jh.jh_lib import DRAFT_LABEL, GLOSSARY_LABEL, IN_PROGRESS_LABEL, Store
 
 MARKED_CDN = "https://cdnjs.cloudflare.com/ajax/libs/marked/15.0.12/marked.min.js"
 MERMAID_CDN = "https://cdnjs.cloudflare.com/ajax/libs/mermaid/11.12.0/mermaid.min.js"
+HLJS_CDN = "https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/highlight.min.js"
+HLJS_LIGHT_CSS = "https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/styles/github.min.css"
+HLJS_DARK_CSS = "https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/styles/github-dark.min.css"
 
 
 _GLOSSARY_ENTRY = re.compile(
@@ -194,7 +197,8 @@ def render_issue(
 # sun/moon button, `BODY_CSS` how rendered markdown looks. `THEME_JS` expects
 # a `#theme` button and calls `onThemeChange()` after a flip; `MARKDOWN_JS`
 # expects `data` (`repo`, `baseUrl`, `docs`) and `issueHref(n)` in scope and
-# defines `esc`, `slug`, `docHref`, `setupMarked`, `md` and `drawMermaid`.
+# defines `esc`, `slug`, `docHref`, `setupMarked`, `md`, `drawMermaid`,
+# `setupHljs` and `highlightCode`.
 THEME_CSS = r""":root {
   color-scheme: light dark;
   --bg: #fafafa; --fg: #1f2328; --muted: #656d76; --line: #d0d7de; --card: #ffffff;
@@ -272,6 +276,8 @@ THEME_JS = r"""  // Light or dark: the browser's preference until the reader cli
   function applyTheme() {
     document.documentElement.setAttribute("data-theme", theme);
     if (window.mermaid) window.mermaid.initialize({ startOnLoad: false, theme: isDark() ? "dark" : "default" });
+    var light = document.getElementById("hljs-light"), dark = document.getElementById("hljs-dark");
+    if (light && dark) { light.disabled = isDark(); dark.disabled = !isDark(); }
   }
   applyTheme();
   document.getElementById("theme").onclick = function () {
@@ -378,6 +384,24 @@ MARKDOWN_JS = r"""  var esc = function (s) { return String(s == null ? "" : s).r
       c.parentNode.replaceWith(m); nodes.push(m);
     });
     try { var p = window.mermaid.run({ nodes: nodes }); if (p && p.catch) p.catch(function () {}); } catch (e) {}
+  }
+  // Code fences with a language get highlight.js colours; a fence with no
+  // language, such as command output, is left alone rather than guessed at.
+  // Starlark is close enough to Python for its grammar.
+  function setupHljs() {
+    if (!window.hljs) return;
+    try {
+      window.hljs.configure({ ignoreUnescapedHTML: true });
+      window.hljs.registerAliases(["starlark", "bzl", "bazel"], { languageName: "python" });
+    } catch (e) {}
+  }
+  function highlightCode(root) {
+    if (!window.hljs) return;
+    var fences = root.querySelectorAll('.body pre > code[class*="language-"]');
+    Array.prototype.forEach.call(fences, function (c) {
+      if (c.classList.contains("language-mermaid") || c.classList.contains("hljs")) return;
+      try { window.hljs.highlightElement(c); } catch (e) {}
+    });
   }
   // Glossary terms in rendered prose get a dotted underline and the
   // definition as a tooltip: the first occurrence in each issue, counting
@@ -558,6 +582,9 @@ def _fill(template: str) -> str:
         .replace("__DIFF_JS__", DIFF_JS)
         .replace("__MARKED__", MARKED_CDN)
         .replace("__MERMAID__", MERMAID_CDN)
+        .replace("__HLJS__", HLJS_CDN)
+        .replace("__HLJS_LIGHT__", HLJS_LIGHT_CSS)
+        .replace("__HLJS_DARK__", HLJS_DARK_CSS)
     )
 
 
@@ -567,6 +594,8 @@ _TEMPLATE = r"""<!doctype html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>__TITLE__</title>
+<link rel="stylesheet" id="hljs-light" href="__HLJS_LIGHT__">
+<link rel="stylesheet" id="hljs-dark" href="__HLJS_DARK__" disabled>
 <style>
 __THEME_CSS__
 * { box-sizing: border-box; }
@@ -776,6 +805,7 @@ __MARKDOWN_JS__
     }).join("");
     document.getElementById("board").innerHTML = out;
     drawMermaid(document.getElementById("board"));
+    highlightCode(document.getElementById("board"));
     applyGlossary(document.getElementById("board"));
     Array.prototype.forEach.call(document.querySelectorAll("details.milestone"), function (d) {
       d.addEventListener("toggle", function () {
@@ -872,6 +902,7 @@ __MARKDOWN_JS__
   load("__MARKED__", setupMarked);
   setupGlossary();
   load("__MERMAID__", applyTheme);
+  load("__HLJS__", setupHljs);
   render();
   if (LIVE) setTimeout(poll, 3000);
 })();
@@ -887,6 +918,8 @@ _ISSUE_TEMPLATE = r"""<!doctype html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>__TITLE__</title>
+<link rel="stylesheet" id="hljs-light" href="__HLJS_LIGHT__">
+<link rel="stylesheet" id="hljs-dark" href="__HLJS_DARK__" disabled>
 <style>
 __THEME_CSS__
 * { box-sizing: border-box; }
@@ -1048,6 +1081,7 @@ __DIFF_JS__
       '<section class="body-box">' + body + '</section>' + comments;
     if (diff) applyMarks(root.querySelector(".body-box"));
     drawMermaid(root);
+    highlightCode(root);
     applyGlossary(root, issue.number);
     var revs = document.getElementById("revs");
     if (revs) revs.onclick = function () { if (sel) select(null); else select(Math.max(1, K - 1), K); };
@@ -1077,6 +1111,7 @@ __DIFF_JS__
   load("__MARKED__", setupMarked);
   setupGlossary();
   load("__MERMAID__", applyTheme);
+  load("__HLJS__", setupHljs);
   render();
 })();
 </script>

@@ -35,6 +35,9 @@ from jh.jh_lib import DRAFT_LABEL, IN_PROGRESS_LABEL, JhError
 
 MARKED_CDN = "https://cdnjs.cloudflare.com/ajax/libs/marked/15.0.12/marked.min.js"
 MERMAID_CDN = "https://cdnjs.cloudflare.com/ajax/libs/mermaid/11.12.0/mermaid.min.js"
+HLJS_CDN = "https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/highlight.min.js"
+HLJS_LIGHT_CSS = "https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/styles/github.min.css"
+HLJS_DARK_CSS = "https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/styles/github-dark.min.css"
 
 
 def parse_docs_args(specs: list[str]) -> dict[str, Path]:
@@ -160,6 +163,9 @@ def render_page(
         .replace("__DATA__", payload)
         .replace("__MARKED__", MARKED_CDN)
         .replace("__MERMAID__", MERMAID_CDN)
+        .replace("__HLJS__", HLJS_CDN)
+        .replace("__HLJS_LIGHT__", HLJS_LIGHT_CSS)
+        .replace("__HLJS_DARK__", HLJS_DARK_CSS)
     )
 
 
@@ -376,6 +382,8 @@ _TEMPLATE = r"""<!doctype html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>__TITLE__</title>
+<link rel="stylesheet" href="__HLJS_LIGHT__" media="(prefers-color-scheme: light)">
+<link rel="stylesheet" href="__HLJS_DARK__" media="(prefers-color-scheme: dark)">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Serif:ital,wght@0,400;0,600;1,400&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
 <style>
@@ -404,6 +412,7 @@ __CSS__
 </main>
 <script src="__MARKED__"></script>
 <script src="__MERMAID__"></script>
+<script src="__HLJS__"></script>
 <script>
 const DATA = __DATA__;
 const depth = DATA.path.split("/").length - 1;
@@ -480,6 +489,18 @@ try {
     const pre = c.parentNode;
     const m = document.createElement("pre"); m.className = "mermaid"; m.textContent = c.textContent;
     pre.replaceWith(m);
+  }
+  // Code fences with a language get highlight.js colours; unlabelled fences
+  // (command output) are left alone. Starlark uses Python's grammar.
+  if (window.hljs) {
+    try {
+      hljs.configure({ ignoreUnescapedHTML: true });
+      hljs.registerAliases(["starlark", "bzl", "bazel"], { languageName: "python" });
+    } catch (err) {}
+    for (const c of doc.querySelectorAll('pre > code[class*="language-"]')) {
+      if (c.classList.contains("language-mermaid")) continue;
+      try { hljs.highlightElement(c); } catch (err) {}
+    }
   }
   // Stable block anchors: the hook for annotations.
   let i = 0;
