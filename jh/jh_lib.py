@@ -23,6 +23,7 @@ DEFAULT_PORT = 7411
 DEFAULT_HOST = "127.0.0.1"
 IN_PROGRESS_LABEL = "in-progress"
 DRAFT_LABEL = "draft"
+GLOSSARY_LABEL = "glossary"
 
 # gh 2.88.1 `gh issue list --json` field list, plus the jh extensions.
 ISSUE_FIELDS_GH = [
@@ -1113,6 +1114,43 @@ class Store:
 
     # -- events ------------------------------------------------------------
 
+    def issue_history(self, repo: str, number: int) -> list[dict[str, Any]]:
+        """Every revision of an issue's title and body, oldest first.
+
+        Revision 1 is the creation; each later `issue.edited` event that
+        changed the title or body adds one, so the log itself is the history.
+
+        Returns:
+            `[{"rev", "seq", "ts", "actor", "title", "body"}, ...]`.
+        """
+        state = self.repo(repo)
+        state.issue(number)
+        out: list[dict[str, Any]] = []
+        title = body = ""
+        for event in state.events:
+            if event.get("number") != number:
+                continue
+            if event["type"] == "issue.created":
+                title, body = event["title"], event.get("body", "")
+            elif event["type"] == "issue.edited" and (
+                "title" in event or "body" in event
+            ):
+                title = event.get("title", title)
+                body = event.get("body", body)
+            else:
+                continue
+            out.append(
+                {
+                    "rev": len(out) + 1,
+                    "seq": event["seq"],
+                    "ts": event["ts"],
+                    "actor": event["actor"],
+                    "title": title,
+                    "body": body,
+                }
+            )
+        return out
+
     def events_since(self, repo: str, since: int = 0) -> list[dict[str, Any]]:
         """Return the raw events with `seq > since`."""
         state = self.repo(repo)
@@ -1121,7 +1159,7 @@ class Store:
     # -- JSON rendering ----------------------------------------------------
 
     def issue_url(self, repo: str, number: int) -> str:
-        """Return the issue URL (a board deep link on the server)."""
+        """Return the issue URL (its reading page on the server; JSON for API clients)."""
         return f"{self.base_url}/{repo}/issues/{number}"
 
     def issue_json(self, state: RepoState, issue: dict[str, Any]) -> dict[str, Any]:

@@ -12,10 +12,10 @@ view for the person, and the log is a file you can back up with `cp`.
 ```
 bin/jh, bin/jh-server      launchers for running from a checkout
 jh/jh_lib.py               model, event log, replay, ready/blocked logic
-jh/jh_server.py            single-threaded http.server, REST subset, /board
+jh/jh_server.py            single-threaded http.server, REST subset, /board, /book
 jh/jh_cli.py               argparse mirroring gh's grammar, --json/--jq
-jh/board.py                board HTML (live on the server, or a snapshot)
-jh/docs.py                 docs viewer: markdown under --docs REPO=DIR at /REPO/docs
+jh/board.py                board HTML (live on the server, or a snapshot); issue reading page
+jh/docs.py                 docs viewer: markdown under --docs REPO=DIR at /REPO/docs; the book
 skills/issues/SKILL.md     the one-paragraph skill agents read
 tests/                     pytest, incl. gh 2.88.1 parity fixtures
 ```
@@ -128,6 +128,39 @@ the repo has a docs root (below), a document path in the text links into
 the docs viewer: `docs/plan.md`, `plan.md` if the name is unique in the
 tree, and `docs/plan.md#Heading text` or `[the plan](docs/plan.md#Heading)`
 for a section, the heading slugged the way the viewer slugs its ids.
+Tables in a card scroll sideways rather than wrapping inside a cell.
+
+An open issue labelled `glossary` is the repo's glossary. Each line of its
+body of the form `**Term.** One sentence. (#N)` is an entry (the issue
+reference optional; other lines are ignored), and `GET
+/demo/board?format=json` returns them under `glossary`. In every other
+issue the board and the reading page mark the first occurrence of each
+term, counting the body and its comments as one document, longest term
+first, whole word, plural allowed, outside code, links and headings, with a
+dotted underline and the definition as a tooltip that stays visible inside
+a scrolling table.
+
+A card's title opens the issue's reading page,
+`http://127.0.0.1:7411/demo/issues/12` in a browser (the same URL returns
+JSON to `jh` and other API clients): title, labels, milestone, blockers,
+body and comments at full width, rendered the same way as the card, with
+`#N` linking to issue N's reading page. The page knows the issue's
+revisions (every creation or edit that changed the title or body, straight
+from the event log; `GET /demo/issues/12/history` returns them): the
+"N revisions" link shows the latest revision with the words changed since
+the previous one marked, insertions highlighted and deletions struck
+through, and two pickers choose any pair. The view lives in the URL, so
+`http://127.0.0.1:7411/demo/issues/12#diff=2..5` is linkable and
+`#diff=3..3` shows revision 3 as it was. A changed mermaid diagram is
+outlined as a whole.
+
+`http://127.0.0.1:7411/demo/book` is the repo's book: every issue labelled
+`kind:concept` or `kind:docs`, in number order, grouped by milestone in a
+sidebar of links to their reading pages, in the docs viewer's layout; docs
+entries carry a small "docs" marker. Unfinished chapters
+carry their board column (draft, blocked, ready, in progress) as a tag; the
+"finished only" switch hides them, remembered per browser. `?format=json`
+returns the same groups as data.
 
 Extensions (GitHub concepts gh's CLI does not expose) are `--blocked-by`,
 `--add-blocked-by` / `--remove-blocked-by`, `jh issue list --ready |

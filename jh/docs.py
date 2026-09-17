@@ -10,6 +10,14 @@ only; `?format=raw` returns the markdown itself and `?format=json` the tree.
 Every rendered top-level block carries a stable `data-block` index and every
 heading a GitHub-style id. Those are the anchors an annotation layer attaches
 to later, so they exist now.
+
+`/:repo/book` reuses the viewer's layout for the repo's book: every issue
+labelled `kind:concept` or `kind:docs`, in number order, grouped by
+milestone in the sidebar, each linking to the issue's reading page
+(`render_book`); docs entries carry a small "docs" marker. Unfinished
+chapters carry their board column (draft, blocked, ready, in progress) as a
+tag; a "finished only" switch in the header hides them, remembered per
+browser.
 """
 
 from __future__ import annotations
@@ -18,11 +26,12 @@ import html
 import json
 import mimetypes
 import os
+import re
 import time
 from pathlib import Path
 from typing import Any
 
-from jh.jh_lib import JhError
+from jh.jh_lib import DRAFT_LABEL, IN_PROGRESS_LABEL, JhError
 
 MARKED_CDN = "https://cdnjs.cloudflare.com/ajax/libs/marked/15.0.12/marked.min.js"
 MERMAID_CDN = "https://cdnjs.cloudflare.com/ajax/libs/mermaid/11.12.0/mermaid.min.js"
@@ -146,23 +155,144 @@ def render_page(
     }
     payload = json.dumps(data).replace("</", "<\\/")
     return (
-        _TEMPLATE.replace("__TITLE__", html.escape(f"{title} · {repo} docs"))
+        _TEMPLATE.replace("__CSS__", LAYOUT_CSS)
+        .replace("__TITLE__", html.escape(f"{title} · {repo} docs"))
         .replace("__DATA__", payload)
         .replace("__MARKED__", MARKED_CDN)
         .replace("__MERMAID__", MERMAID_CDN)
     )
 
 
-_TEMPLATE = r"""<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>__TITLE__</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Serif:ital,wght@0,400;0,600;1,400&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
-<style>
-:root {
+# Labels whose issues make up the book, with the marker shown next to the
+# entry. Concepts are the chapters proper and go unmarked.
+BOOK_LABELS = {"kind:concept": "concept", "kind:docs": "docs"}
+
+
+def book_groups(store: Any, repo: str) -> list[dict[str, Any]]:
+    """The book's contents: `kind:concept` and `kind:docs` issues by milestone.
+
+    Args:
+        store: The store to read from.
+        repo: Repo name.
+
+    Returns:
+        One group per milestone that has at least one such issue, in the
+        board's milestone order (leading number in the title, then due
+        date, then number; "No milestone" last), each `{"title", "number",
+        "issues": [<issue JSON plus "column" and "kind">]}` with issues in
+        number order. `column` is the board column the issue sits in:
+        `draft`, `blocked`, `ready`, `progress` or `closed`; `kind` is
+        `concept` or `docs`.
+    """
+    issues = [
+        i
+        for i in store.issue_list(repo, {"state": "all", "limit": 100000})
+        if any(label["name"] in BOOK_LABELS for label in i["labels"])
+    ]
+    issues.sort(key=lambda i: i["number"])
+    by_milestone: dict[int | None, list[dict[str, Any]]] = {}
+    for issue in issues:
+        issue = dict(issue)
+        issue["column"] = _column(issue)
+        names = {label["name"] for label in issue["labels"]}
+        issue["kind"] = "concept" if "kind:concept" in names else "docs"
+        key = issue["milestone"]["number"] if issue["milestone"] else None
+        by_milestone.setdefault(key, []).append(issue)
+
+    def stage(title: str) -> int:
+        match = re.match(r"\s*(\d+)", title)
+        return int(match.group(1)) if match else 10**9
+
+    milestones = store.milestone_list(repo, {"state": "all"})
+    milestones.sort(
+        key=lambda m: (stage(m["title"]), m["dueOn"] or "9999", m["number"])
+    )
+    groups = [
+        {"number": m["number"], "title": m["title"], "issues": by_milestone[m["number"]]}
+        for m in milestones
+        if m["number"] in by_milestone
+    ]
+    if None in by_milestone:
+        groups.append({"number": None, "title": "No milestone", "issues": by_milestone[None]})
+    return groups
+
+
+def _column(issue: dict[str, Any]) -> str:
+    """The board column for an issue JSON object (mirrors the board's `column`)."""
+    names = {label["name"] for label in issue["labels"]}
+    if issue["state"] == "CLOSED":
+        return "closed"
+    if IN_PROGRESS_LABEL in names:
+        return "progress"
+    if DRAFT_LABEL in names:
+        return "draft"
+    if any(d["state"] == "OPEN" for d in issue["blockedBy"]):
+        return "blocked"
+    return "ready"
+
+
+_COLUMN_TAG = {
+    "draft": "draft",
+    "blocked": "blocked",
+    "ready": "ready",
+    "progress": "in progress",
+}
+
+
+def render_book(repo: str, groups: list[dict[str, Any]], has_docs: bool) -> str:
+    """The book page: the docs viewer's layout with the contents as the sidebar.
+
+    Each link opens the issue's reading page. Unfinished chapters carry a tag
+    naming their board column; the "finished only" switch hides them. The
+    main column repeats the contents at reading size so the page stands on
+    its own.
+    """
+    base = f"/{html.escape(repo, quote=True)}"
+    nav: list[str] = []
+    body: list[str] = []
+    for group in groups:
+        finished = sum(i["column"] == "closed" for i in group["issues"])
+        cls = ' class="unfinished"' if not finished else ""
+        nav.append(f"<h2{cls}>{html.escape(group['title'])}</h2><ul{cls}>")
+        body.append(f"<h2{cls}>{html.escape(group['title'])}</h2><ol{cls}>")
+        for issue in group["issues"]:
+            href = f"{base}/issues/{issue['number']}"
+            title = html.escape(issue["title"])
+            col, kind = issue["column"], issue["kind"]
+            tag = f' <span class="tag {col}">{_COLUMN_TAG[col]}</span>' if col != "closed" else ""
+            if kind != "concept":
+                tag = f' <span class="tag kind">{kind}</span>' + tag
+            classes = " ".join(c for c in (col if col != "closed" else "", kind) if c)
+            nav.append(
+                f'<li class="{classes}"><a href="{href}" title="#{issue["number"]}">{title}</a>{tag}</li>'
+            )
+            body.append(
+                f'<li class="{classes}" value="{issue["number"]}"><a href="{href}">{title}</a>{tag}</li>'
+            )
+        nav.append("</ul>")
+        body.append("</ol>")
+    total = sum(len(g["issues"]) for g in groups)
+    done = sum(i["column"] == "closed" for g in groups for i in g["issues"])
+    if not groups:
+        body.append(
+            "<p>Nothing yet: the book is every issue labelled "
+            + " or ".join(f"<code>{html.escape(n)}</code>" for n in BOOK_LABELS)
+            + ", grouped by milestone.</p>"
+        )
+    docs_link = f'<a href="{base}/docs/">docs</a>' if has_docs else ""
+    return (
+        _BOOK_TEMPLATE.replace("__CSS__", LAYOUT_CSS)
+        .replace("__TITLE__", html.escape(f"{repo} book"))
+        .replace("__REPO__", html.escape(repo))
+        .replace("__BASE__", base)
+        .replace("__DOCS_LINK__", docs_link)
+        .replace("__COUNT__", f"{done} of {total} {'chapter' if total == 1 else 'chapters'} finished")
+        .replace("__NAV__", "".join(nav))
+        .replace("__BODY__", "".join(body))
+    )
+
+
+LAYOUT_CSS = r""":root {
   color-scheme: light dark;
   --paper: #f3f5f7; --card: #ffffff; --ink: #1b2430; --ink-2: #3d4a58; --muted: #66727f; --rule: #d6dce2;
   --accent: #0f6e74; --accent-soft: #e0eff0; --code: #eaeef2; --hilite: #fbefdc;
@@ -238,7 +368,18 @@ article [data-block]:target { background: var(--hilite); outline: 8px solid var(
   nav { position: static; height: auto; border-right: 0; border-bottom: 1px solid var(--rule); }
   main { padding: 20px 16px 64px; }
   article h1 { font-size: 30px; }
-}
+}"""
+
+_TEMPLATE = r"""<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>__TITLE__</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Serif:ital,wght@0,400;0,600;1,400&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+__CSS__
 </style>
 </head>
 <body>
@@ -355,6 +496,66 @@ try {
   e.textContent = "Could not render (is the marked CDN reachable?): " + err;
   document.getElementById("doc").innerHTML = "<pre>" + DATA.text.replace(/[&<>]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;"}[c])) + "</pre>";
 }
+</script>
+</body>
+</html>
+"""
+
+_BOOK_TEMPLATE = r"""<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>__TITLE__</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Serif:ital,wght@0,400;0,600;1,400&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+__CSS__
+article ol { padding-left: 0; list-style-position: inside; }
+article ol li::marker { color: var(--muted); font-variant-numeric: tabular-nums; }
+article ol li a { text-decoration: none; }
+article ol li a:hover { text-decoration: underline; }
+nav li a { display: inline-block; max-width: 100%; vertical-align: bottom; }
+.tag { display: inline-block; font: 500 10.5px/1.6 "IBM Plex Mono", Menlo, Consolas, monospace; letter-spacing: .04em;
+  text-transform: uppercase; border-radius: 4px; padding: 0 6px; margin-left: 6px; vertical-align: middle; color: #fff; }
+.tag.draft { background: #6e7781; } .tag.blocked { background: #bc4c00; } .tag.ready { background: #1a7f37; } .tag.progress { background: #0969da; }
+.tag.kind { background: var(--accent-soft); color: var(--accent); }
+li.draft a { color: var(--muted); }
+header label { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; color: var(--muted); }
+header label input { margin: 0; accent-color: var(--accent); }
+body.finished-only li.draft, body.finished-only li.blocked, body.finished-only li.ready, body.finished-only li.progress,
+body.finished-only .unfinished { display: none; }
+</style>
+</head>
+<body>
+<header>
+  <h1><a href="__BASE__/book">__REPO__ book</a></h1>
+  <span class="crumbs"><code>kind:concept</code> and <code>kind:docs</code> issues, by milestone</span>
+  <span class="right">
+    <span>__COUNT__</span>
+    <label><input type="checkbox" id="finished"> finished only</label>
+    __DOCS_LINK__
+    <a href="__BASE__/board">board</a>
+  </span>
+</header>
+<nav>
+__NAV__
+</nav>
+<main>
+  <article id="doc">
+    <h1>__REPO__</h1>
+__BODY__
+  </article>
+</main>
+<script>
+(function () {
+  var key = "jh-book-finished-only", box = document.getElementById("finished");
+  var on = false;
+  try { on = localStorage.getItem(key) === "1"; } catch (e) {}
+  function apply() { box.checked = on; document.body.classList.toggle("finished-only", on); }
+  box.onchange = function () { on = box.checked; try { localStorage.setItem(key, on ? "1" : "0"); } catch (e) {} apply(); };
+  apply();
+})();
 </script>
 </body>
 </html>

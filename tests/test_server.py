@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import shutil
+import subprocess
 import threading
 from pathlib import Path
 from typing import Any
@@ -170,7 +172,7 @@ def test_rest_surface(running: Any) -> None:
     assert call(base, "PATCH", "/demo/labels", {})[0] == 405
 
 
-def test_board_and_browser_redirect(running: Any) -> None:
+def test_board_reading_page_and_browser_redirect(running: Any) -> None:
     base = running.url
     seed(base)
     status, page, headers = call(base, "GET", "/demo/board", accept="text/html")
@@ -179,6 +181,8 @@ def test_board_and_browser_redirect(running: Any) -> None:
         and "<title>demo board</title>" in page
         and '"repo": "demo"' in page
     )
+    assert "issuePage(issue.number)" in page
+    assert ".card .body th, .card .body td { white-space: nowrap; }" in page
     status, data, _ = call(base, "GET", "/demo/board?format=json")
     assert (
         status == 200
@@ -186,10 +190,16 @@ def test_board_and_browser_redirect(running: Any) -> None:
         and len(data["issues"]) == 2
         and data["seq"] > 0
     )
-    status, _, headers = call(
+    status, page, headers = call(
         base, "GET", "/demo/issues/2", accept="text/html,application/xhtml+xml"
     )
-    assert status == 302 and headers["Location"] == "/demo/board#issue-2"
+    assert status == 200 and headers["Content-Type"].startswith("text/html")
+    assert "<title>#2 Latency · demo</title>" in page
+    assert '"number": 2' in page and '"blockedBy": [{"number": 1' in page
+    assert "cdnjs.cloudflare.com/ajax/libs/marked/" in page
+    # The board's card titles link to the reading page.
+    assert "/issues/\" + issue.number" in page or "/issues/" in page
+    assert call(base, "GET", "/demo/issues/9", accept="text/html")[0] == 404
     status, _, headers = call(base, "GET", "/demo", accept="text/html")
     assert status == 302 and headers["Location"] == "/demo/board"
     status, index, _ = call(base, "GET", "/", accept="text/html")
@@ -352,3 +362,140 @@ def test_bad_bodies_are_400(running: Any, bad: bytes) -> None:
     with pytest.raises(error.HTTPError) as err:
         request.urlopen(req, timeout=5)
     assert err.value.code == 400
+
+
+def test_book_lists_concepts_by_milestone_with_state(running: Any) -> None:
+    base = running.url
+    seed(base)
+    call(base, "POST", "/demo/labels", {"name": "kind:concept", "color": "0075ca"})
+    call(base, "POST", "/demo/milestones", {"title": "0 · tracer"})
+    for title, ms in (("Later concept", "Increment 1"), ("Early concept", "0 · tracer"),
+                      ("Orphan concept", None), ("Open concept", "0 · tracer")):
+        body = {"title": title, "body": "", "labels": ["kind:concept"]}
+        if ms:
+            body["milestone"] = ms
+        assert call(base, "POST", "/demo/issues", body)[0] == 201
+    # 3..5 close; 6 stays open; 1 closes without the label.
+    for n in (3, 4, 5, 1):
+        call(base, "PATCH", f"/demo/issues/{n}", {"state": "closed"})
+
+    call(base, "POST", "/demo/labels", {"name": "draft", "color": "888888"})
+    call(base, "POST", "/demo/issues", {"title": "Draft concept", "body": "",
+                                        "labels": ["kind:concept", "draft"], "milestone": "0 · tracer"})
+    call(base, "POST", "/demo/issues", {"title": "Blocked concept", "body": "",
+                                        "labels": ["kind:concept"], "blockedBy": [6]})
+    call(base, "POST", "/demo/labels", {"name": "kind:docs", "color": "0075ca"})
+    call(base, "POST", "/demo/issues", {"title": "Glossary", "body": "",
+                                        "labels": ["kind:docs"], "milestone": "Increment 1"})
+
+    status, book, _ = call(base, "GET", "/demo/book?format=json")
+    assert status == 200
+    assert [(g["title"], [(i["number"], i["column"], i["kind"]) for i in g["issues"]]) for g in book["groups"]] == [
+        ("0 · tracer", [(4, "closed", "concept"), (6, "ready", "concept"), (7, "draft", "concept")]),
+        ("Increment 1", [(3, "closed", "concept"), (9, "ready", "docs")]),
+        ("No milestone", [(5, "closed", "concept"), (8, "blocked", "concept")]),
+    ]
+
+    status, page, headers = call(base, "GET", "/demo/book", accept="text/html")
+    assert status == 200 and headers["Content-Type"].startswith("text/html")
+    assert "<title>demo book</title>" in page and "3 of 7 chapters finished" in page
+    assert page.index("0 · tracer") < page.index("Increment 1") < page.index("No milestone")
+    assert '<li class="concept"><a href="/demo/issues/4" title="#4">Early concept</a></li>' in page
+    assert '<li class="draft concept"><a href="/demo/issues/7" title="#7">Draft concept</a> <span class="tag draft">draft</span>' in page
+    assert ('<li class="ready docs"><a href="/demo/issues/9" title="#9">Glossary</a>'
+            ' <span class="tag kind">docs</span> <span class="tag ready">ready</span>') in page
+    assert '<span class="tag blocked">blocked</span>' in page and '<span class="tag ready">ready</span>' in page
+    assert "Router" not in page  # not a concept
+    assert 'id="finished"' in page
+    assert 'href="/demo/docs/"' not in page and 'href="/demo/board"' in page
+    assert call(base, "GET", "/nope/book")[0] == 404
+
+
+def test_issue_history_is_title_and_body_revisions(running: Any) -> None:
+    base = running.url
+    seed(base)
+    call(base, "PATCH", "/demo/issues/1", {"body": "a b c"}, actor="alice")
+    call(base, "PATCH", "/demo/issues/1", {"addLabels": ["bug"]})  # not a revision
+    call(base, "PATCH", "/demo/issues/1", {"title": "Router v2"}, actor="bob")
+    status, hist, _ = call(base, "GET", "/demo/issues/1/history")
+    assert status == 200
+    assert [(h["rev"], h["actor"], h["title"], h["body"]) for h in hist] == [
+        (1, "claude", "Router", "a"),
+        (2, "alice", "Router", "a b c"),
+        (3, "bob", "Router v2", "a b c"),
+    ]
+    assert [h["seq"] for h in hist] == sorted(h["seq"] for h in hist)
+    assert call(base, "GET", "/demo/issues/9/history")[0] == 404
+    # The reading page carries the same revisions for its #diff=A..B view.
+    status, page, _ = call(base, "GET", "/demo/issues/1", accept="text/html")
+    assert status == 200 and '"rev": 3' in page and "#diff=" in page and "function markup(" in page
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node not installed")
+def test_diff_markup_keeps_markdown_structure(tmp_path: Path) -> None:
+    """The word diff marks changed words without breaking block syntax."""
+    from jh.board import DIFF_JS
+
+    script = tmp_path / "diff.js"
+    script.write_text(
+        "var esc = function (s) { return String(s); };\n" + DIFF_JS + """
+var show = function (s) { return s.replace(/\uE000/g, "{+").replace(/\uE001/g, "+}").replace(/\uE002/g, "[-").replace(/\uE003/g, "-]"); };
+var cases = JSON.parse(require("fs").readFileSync(0, "utf8"));
+console.log(JSON.stringify(cases.map(function (c) { return show(markup(c[0], c[1])); })));
+"""
+    )
+    cases = [
+        ["the quick fox", "the slow fox"],
+        ["# Title\n\npara\n", "# New Title\n\npara\n\nextra\n"],
+        ["- a\n- b\n", "- a\n- b\n- c\n"],
+        ["| a | b |\n|---|---|\n| 1 | 2 |\n", "| a | b |\n|---|---|\n| 1 | 2 |\n| 3 | 4 |\n"],
+        ["same", "same"],
+        ["", "new"],
+        ["gone", ""],
+    ]
+    out = subprocess.run(
+        ["node", str(script)], input=json.dumps(cases), capture_output=True, text=True, check=True
+    )
+    assert json.loads(out.stdout) == [
+        "the [-quick-]{+slow+} fox",
+        "# {+New+} Title\n\npara\n\n{+extra+}\n",
+        "- a\n- b\n- {+c+}\n",
+        "| a | b |\n|---|---|\n| 1 | 2 |\n| {+3 | 4 +}|\n",
+        "same",
+        "{+new+}",
+        "[-gone-]",
+    ]
+
+
+def test_glossary_is_parsed_from_the_labelled_issue(running: Any) -> None:
+    base = running.url
+    seed(base)
+    assert call(base, "GET", "/demo/board?format=json")[1]["glossary"] is None
+    assert call(base, "POST", "/demo/labels", {"name": "glossary", "color": "ededed"})[0] == 201
+    body = (
+        "Intro line, not an entry.\n\n## Build\n\n"
+        "**Crate.** Rust's unit of compilation. (#1)\n\n"
+        "**.bzl file.** A Starlark source file that defines rules. (#1)\n\n"
+        "**Perfetto.** The open-source trace viewer.\n"
+    )
+    status, issue, _ = call(
+        base, "POST", "/demo/issues", {"title": "Glossary", "body": body, "labels": ["glossary"]}
+    )
+    assert status == 201
+    status, data, _ = call(base, "GET", "/demo/board?format=json")
+    assert status == 200 and data["glossary"] == {
+        "source": issue["number"],
+        "entries": [
+            {"term": "Crate", "definition": "Rust's unit of compilation.", "issue": 1},
+            {"term": ".bzl file", "definition": "A Starlark source file that defines rules.", "issue": 1},
+            {"term": "Perfetto", "definition": "The open-source trace viewer.", "issue": None},
+        ],
+    }
+    # Both pages carry the data and the pass that applies it.
+    status, page, _ = call(base, "GET", "/demo/issues/1", accept="text/html")
+    assert status == 200 and '"glossary": {"source": ' in page and "applyGlossary(root, issue.number)" in page
+    status, page, _ = call(base, "GET", "/demo/board", accept="text/html")
+    assert status == 200 and "abbr.gloss" in page
+    # Closing the glossary issue withdraws it.
+    assert call(base, "PATCH", f"/demo/issues/{issue['number']}", {"state": "closed"})[0] == 200
+    assert call(base, "GET", "/demo/board?format=json")[1]["glossary"] is None

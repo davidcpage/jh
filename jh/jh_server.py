@@ -6,6 +6,7 @@ REST subset with GitHub's paths and gh's field names:
     GET  /:repo/issues                  POST /:repo/issues
     GET  /:repo/issues/:n               PATCH /:repo/issues/:n    DELETE /:repo/issues/:n
     GET  /:repo/issues/:n/comments      POST /:repo/issues/:n/comments
+    GET  /:repo/issues/:n/history       (title/body revisions, oldest first)
     PATCH /:repo/issues/comments/:id    DELETE /:repo/issues/comments/:id
     GET  /:repo/labels                  POST /:repo/labels
     GET  /:repo/labels/:name            PATCH /:repo/labels/:name DELETE /:repo/labels/:name
@@ -13,11 +14,12 @@ REST subset with GitHub's paths and gh's field names:
     GET  /:repo/milestones/:n           PATCH /:repo/milestones/:n
     GET  /:repo/events?since=SEQ
     GET  /:repo/board                   (HTML; `?format=json` for the board data)
+    GET  /:repo/book                    (HTML: kind:concept issues by milestone)
     GET  /:repo/docs[/path]             (docs viewer over `--docs REPO=DIR`; see docs.py)
 
 Errors are `{"message": ...}` with a 4xx status. The actor comes from the
-`X-JH-Actor` request header. A browser hitting `/:repo/issues/:n` is
-redirected to the board scrolled to that issue.
+`X-JH-Actor` request header. A browser hitting `/:repo/issues/:n` gets the
+issue's reading page instead of JSON.
 """
 
 from __future__ import annotations
@@ -25,7 +27,9 @@ from __future__ import annotations
 import argparse
 import html
 import json
+import os
 import re
+import socket
 import sys
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
@@ -214,17 +218,15 @@ class JhRequestHandler(BaseHTTPRequestHandler):
 
     @route("GET", r"/(?P<repo>[^/]+)/issues/(?P<n>\d+)")
     def issue_get(self, m: dict[str, str], q: dict[str, Any], b: dict[str, Any]) -> Any:
-        """Read an issue; browsers are redirected to the board deep link."""
-        issue = self.store.issue_get(m["repo"], int(m["n"]))
+        """Read an issue as JSON, or its reading page for a browser."""
         if self._wants_html():
-            self._send(
-                302,
-                "text/plain",
-                b"",
-                {"Location": f"/{m['repo']}/board#issue-{m['n']}"},
+            self._send_html(
+                board.render_issue(
+                    self.store, m["repo"], int(m["n"]), self.server.docs.get(m["repo"])
+                )
             )
             return None
-        return issue
+        return self.store.issue_get(m["repo"], int(m["n"]))
 
     @route("PATCH", r"/(?P<repo>[^/]+)/issues/(?P<n>\d+)")
     def issue_edit(
@@ -239,6 +241,13 @@ class JhRequestHandler(BaseHTTPRequestHandler):
     ) -> Any:
         """Delete an issue."""
         return self.store.issue_delete(m["repo"], self.actor, int(m["n"]))
+
+    @route("GET", r"/(?P<repo>[^/]+)/issues/(?P<n>\d+)/history")
+    def issue_history(
+        self, m: dict[str, str], q: dict[str, Any], b: dict[str, Any]
+    ) -> Any:
+        """An issue's title and body revisions, oldest first (rev 1 is creation)."""
+        return self.store.issue_history(m["repo"], int(m["n"]))
 
     # -- comments ----------------------------------------------------------
 
@@ -370,6 +379,15 @@ class JhRequestHandler(BaseHTTPRequestHandler):
         )
         return None
 
+    @route("GET", r"/(?P<repo>[^/]+)/book")
+    def book_page(self, m: dict[str, str], q: dict[str, Any], b: dict[str, Any]) -> Any:
+        """The book: `kind:concept` issues by milestone, linking to reading pages."""
+        groups = docs.book_groups(self.store, m["repo"])
+        if q.get("format") == "json":
+            return {"repo": m["repo"], "groups": groups}
+        self._send_html(docs.render_book(m["repo"], groups, m["repo"] in self.server.docs))
+        return None
+
     # -- docs --------------------------------------------------------------
 
     def _docs_root(self, repo: str) -> Path:
@@ -423,6 +441,17 @@ class JhRequestHandler(BaseHTTPRequestHandler):
         return next(r for r in self.store.repo_list() if r["name"] == m["repo"])
 
 
+def _systemd_listen_socket() -> socket.socket | None:
+    """Return the listening socket passed by systemd, or `None` if not activated."""
+    if os.environ.get("LISTEN_PID") != str(os.getpid()):
+        return None
+    if int(os.environ.get("LISTEN_FDS", "0")) < 1:
+        return None
+    sock = socket.socket(fileno=3)
+    sock.setblocking(True)
+    return sock
+
+
 class JhServer(HTTPServer):
     """`HTTPServer` carrying the store. Single-threaded by design.
 
@@ -443,8 +472,20 @@ class JhServer(HTTPServer):
         verbose: bool = False,
         docs: dict[str, Path] | None = None,
     ) -> None:
-        """Bind to `host:port` (port 0 picks a free one) over the log at `home`."""
-        super().__init__((host, port), JhRequestHandler)
+        """Bind to `host:port` (port 0 picks a free one) over the log at `home`.
+
+        Under systemd socket activation the listening socket is inherited
+        from systemd instead of being bound here, so restarts never refuse
+        connections.
+        """
+        inherited = _systemd_listen_socket()
+        if inherited is None:
+            super().__init__((host, port), JhRequestHandler)
+        else:
+            super().__init__((host, port), JhRequestHandler, bind_and_activate=False)
+            self.socket.close()
+            self.socket = inherited
+            self.server_address = self.socket.getsockname()[:2]
         actual_port = self.server_address[1]
         self.store = Store(home, base_url=f"http://{host}:{actual_port}")
         self.verbose = verbose
