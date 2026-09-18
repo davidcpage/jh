@@ -256,6 +256,9 @@ BODY_CSS = r""".body { margin-top: 6px; font-size: 13px; line-height: 1.45; over
   border-radius: 6px; background: var(--panel); color: var(--fg); border: 1px solid var(--line); box-shadow: var(--shadow);
   font: 12px/1.4 system-ui, sans-serif; white-space: normal; text-align: left; pointer-events: none; }
 .body blockquote { border-left: 3px solid var(--line); color: var(--muted); padding: 0 10px; }
+.body details { margin: 6px 0; border-left: 3px solid transparent; padding-left: 10px; }
+.body details > summary { cursor: pointer; font-weight: 600; }
+.body details[open] { border-left-color: var(--line); }
 .body table { border-collapse: collapse; display: block; max-width: 100%; overflow-x: auto; }
 .body th, .body td { border: 1px solid var(--line); padding: 3px 8px; text-align: left; }
 .body th { background: var(--code); }

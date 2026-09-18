@@ -186,6 +186,8 @@ def test_board_reading_page_and_browser_redirect(running: Any) -> None:
     # Collapsible sections: the marked html renderer lets <details> and
     # <summary> through and escapes every other raw tag.
     assert "(details|summary)( open)?&gt;/g" in page
+    # An expanded section shows a rule down its left edge marking its span.
+    assert ".body details[open] { border-left-color: var(--line); }" in page
     status, data, _ = call(base, "GET", "/demo/board?format=json")
     assert (
         status == 200
