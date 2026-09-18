@@ -183,6 +183,9 @@ def test_board_reading_page_and_browser_redirect(running: Any) -> None:
     )
     assert "issuePage(issue.number)" in page
     assert ".card .body th, .card .body td { white-space: nowrap; }" in page
+    # Collapsible sections: the marked html renderer lets <details> and
+    # <summary> through and escapes every other raw tag.
+    assert "(details|summary)( open)?&gt;/g" in page
     status, data, _ = call(base, "GET", "/demo/board?format=json")
     assert (
         status == 200

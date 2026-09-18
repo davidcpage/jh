@@ -5,7 +5,8 @@ Ready / In progress / Closed (the path a card takes, left to right), a label fil
 card and a mermaid dependency graph (every open issue is a node, with or
 without dependencies). Issue bodies and comments are GitHub-flavoured
 markdown, rendered in the browser with marked (raw HTML in them is shown
-escaped, `#N` links to the card for issue N, mermaid fences are drawn, and
+escaped, except `<details>` and `<summary>` for collapsible sections; `#N`
+links to the card for issue N, mermaid fences are drawn, and
 when the repo has a docs root a document path such as `docs/plan.md` or
 `plan.md#Heading` links into the docs viewer, the heading slugged the way
 the viewer slugs it). The
@@ -355,7 +356,13 @@ MARKDOWN_JS = r"""  var esc = function (s) { return String(s == null ? "" : s).r
       renderer: function (t) { return '<a href="' + esc(issueHref(t.number)) + '">#' + t.number + '</a>'; } };
     window.marked.use({ gfm: true, breaks: false, extensions: [link, docref],
       renderer: {
-        html: function (t) { return esc(t.raw || t.text || t); },
+        // Raw HTML is escaped, except the collapsible-section tags <details>,
+        // <summary> (with an optional `open`) and their closers, which pass
+        // through bare so that a body can fold a sidebar as GitHub does.
+        html: function (t) {
+          return esc(t.raw || t.text || t)
+            .replace(/&lt;(\/?)(details|summary)( open)?&gt;/g, "<$1$2$3>");
+        },
         // [text](docs/plan.md#Heading): resolve a relative .md href the same way.
         link: function (t) {
           var href = t.href, cls = "";
